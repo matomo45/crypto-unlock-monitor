@@ -20,4 +20,5 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           CRYPTORANK_API_KEY: ${{ secrets.CRYPTORANK_API_KEY }}
+          COINGLASS_API_KEY: ${{ secrets.COINGLASS_API_KEY }}
         run: python unlock_monitor.py
