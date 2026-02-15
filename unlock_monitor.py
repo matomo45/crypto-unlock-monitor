@@ -2,7 +2,7 @@ import requests
 import os
 import sys
 
-# 名前を正確に合わせる
+# 金庫から値を取得
 SLACK_URL = os.getenv('SLACK_WEBHOOK_URL')
 CG_API_KEY = os.getenv('COINGLASS_API_KEY')
 
@@ -10,33 +10,38 @@ def get_fr(symbol):
     if not CG_API_KEY:
         return "Key未設定"
     
-    # シンボルを 'SUI' から 'SUI/USDT' 形式に変更（Coinglassの仕様に合わせる）
-    url = f"https://open-api.coinglass.com/public/v2/funding?symbol={symbol}/USDT"
+    # Coinglassで最も安定してデータが取れる形式（例：SUI）
+    # API側で自動的に主要なUSDTペアを探しに行きます
+    url = f"https://open-api.coinglass.com/public/v2/funding?symbol={symbol}"
     headers = {"accept": "application/json", "coinglassApi": CG_API_KEY}
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
         data = response.json()
         
-        # APIキーが間違っている場合はここで判明する
-        if data.get('code') == "50001":
-            return "Keyエラー"
-            
+        # 成功判定
         if data.get('success') and data.get('data'):
-            # BinanceやBybitなどの主要なFRを抽出
-            fr_list = [float(x['fundingRate']) for x in data['data'] if x.get('fundingRate')]
+            # 全取引所の平均FRを計算
+            fr_list = []
+            for item in data['data']:
+                # fundingRateが空でない数値のものだけを抽出
+                val = item.get('fundingRate')
+                if val is not None and str(val).replace('.','').replace('-','').isdigit():
+                    fr_list.append(float(val))
+            
             if fr_list:
                 avg_fr = sum(fr_list) / len(fr_list)
                 return f"{avg_fr:.4f}%"
-    except Exception as e:
-        return f"エラー:{str(e)[:5]}"
+    except Exception:
+        return "通信エラー"
+    
     return "データなし"
 
 def main():
     if not SLACK_URL:
         sys.exit(1)
 
-    # 監視銘柄
+    # 監視銘柄（3月の主要アンロック）
     tokens = [
         {"symbol": "SUI", "date": "03/15"},
         {"symbol": "ARB", "date": "03/16"},
@@ -47,11 +52,11 @@ def main():
     messages = []
     for t in tokens:
         fr = get_fr(t['symbol'])
-        # 判定アイコン
-        icon = "🔵" if "0." in fr and "-" not in fr else "⚠️"
+        # アイコン判定：プラスなら青（ショート有利）、マイナスなら警告
+        icon = "🔵" if "-" not in fr and "0." in fr else "⚠️"
         messages.append(f"{icon} *${t['symbol']}* ({t['date']}) FR: `{fr}`")
 
-    payload = {"text": "🔔 *最新FRレポート*\n" + "\n".join(messages)}
+    payload = {"text": "🔔 *最新FRレポート（30日前監視）*\n" + "\n".join(messages)}
     requests.post(SLACK_URL, json=payload)
 
 if __name__ == "__main__":
