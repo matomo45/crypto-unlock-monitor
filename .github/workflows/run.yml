@@ -1,0 +1,23 @@
+name: Daily Crypto Monitor
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 毎日日本時間 9:00 に自動実行
+  workflow_dispatch:      # 「今すぐ実行」ボタンを表示させる設定
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install requests pandas
+      - name: Run logic
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          CRYPTORANK_API_KEY: ${{ secrets.CRYPTORANK_API_KEY }}
+        run: python unlock_monitor.py
