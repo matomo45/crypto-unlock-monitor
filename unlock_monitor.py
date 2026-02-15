@@ -1,45 +1,26 @@
 import requests
-import json
 import os
-from datetime import datetime, timedelta
-
-# GitHubの環境変数から情報を読み込む（コードに直接書かないため）
-SLACK_URL = os.getenv('SLACK_WEBHOOK_URL')
-CRYPTORANK_API = os.getenv('CRYPTORANK_API_KEY')
-COINGLASS_API = os.getenv('COINGLASS_API_KEY')
-
-def get_unlocks():
-    # 30日後のアンロック銘柄を特定するロジック
-    # ここでは例として主要なL1/L2銘柄を対象にします
-    target_coins = ['SUI', 'ARB', 'STRK', 'SOL']
-    # 実際にはCryptoRank API等を叩いてデータを取得します
-    return [
-        {"symbol": "SUI", "date": "2026-03-15", "pct": 1.4, "vc_roi": 7.5},
-        {"symbol": "ARB", "date": "2026-03-16", "pct": 1.2, "vc_roi": 5.2}
-    ]
-
-def get_market_data(symbol):
-    # Coinglass API等でFRやインフローを取得
-    # 今回はシミュレーション値を返します
-    return {"fr": -0.0001, "inflow": "High"}
+import sys
 
 def main():
-    unlocks = get_unlocks()
-    messages = []
+    # 金庫から値が取れているかチェック
+    url = os.getenv('SLACK_WEBHOOK_URL')
+    api = os.getenv('CRYPTORANK_API_KEY')
 
-    for coin in unlocks:
-        market = get_market_data(coin['symbol'])
-        # 異常検知ロジック
-        status = "🔴 警戒" if market['fr'] < 0 or market['inflow'] == "High" else "🟢 安定"
-        
-        msg = (f"{status} *${coin['symbol']}* ({coin['date']})\n"
-               f" ・解放量: {coin['pct']}% / VC利益: {coin['vc_roi']}倍\n"
-               f" ・現在FR: {market['fr']}% / 取引所流入: {market['inflow']}")
-        messages.append(msg)
+    if not url:
+        print("エラー: SLACK_WEBHOOK_URL が設定されていません。")
+        sys.exit(1)
+    
+    print(f"URL取得成功: {url[:20]}...") # 最初の一部だけ表示して確認
 
-    if messages:
-        payload = {"text": "🔔 *【30日前】アンロック・市場予兆レポート*\n\n" + "\n\n".join(messages)}
-        requests.post(SLACK_URL, data=json.dumps(payload))
+    # テスト送信してみる
+    try:
+        res = requests.post(url, json={"text": "GitHub Actionsからのテスト通知です。"})
+        res.raise_for_status()
+        print("Slack通知に成功しました！")
+    except Exception as e:
+        print(f"送信エラーが発生しました: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
