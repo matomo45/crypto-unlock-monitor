@@ -1,60 +1,58 @@
 import requests
 import os
 import sys
-from datetime import datetime, timedelta
 
-# GitHubのSecretsから読み込み
+# 名前を正確に合わせる
 SLACK_URL = os.getenv('SLACK_WEBHOOK_URL')
 CG_API_KEY = os.getenv('COINGLASS_API_KEY')
 
 def get_fr(symbol):
-    """Coinglass APIから現在のFR（8時間換算）を取得"""
     if not CG_API_KEY:
-        return "N/A"
+        return "Key未設定"
     
-    url = f"https://open-api.coinglass.com/public/v2/funding?symbol={symbol}"
+    # シンボルを 'SUI' から 'SUI/USDT' 形式に変更（Coinglassの仕様に合わせる）
+    url = f"https://open-api.coinglass.com/public/v2/funding?symbol={symbol}/USDT"
     headers = {"accept": "application/json", "coinglassApi": CG_API_KEY}
     
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=10)
         data = response.json()
-        if data['code'] == "0" and data['data']:
-            # 複数の取引所の平均FRを取得
-            fr_list = [float(x['fundingRate']) for x in data['data'] if x['fundingRate']]
-            avg_fr = sum(fr_list) / len(fr_list) if fr_list else 0
-            return f"{avg_fr:.4f}%"
-    except:
-        return "取得失敗"
-    return "N/A"
+        
+        # APIキーが間違っている場合はここで判明する
+        if data.get('code') == "50001":
+            return "Keyエラー"
+            
+        if data.get('success') and data.get('data'):
+            # BinanceやBybitなどの主要なFRを抽出
+            fr_list = [float(x['fundingRate']) for x in data['data'] if x.get('fundingRate')]
+            if fr_list:
+                avg_fr = sum(fr_list) / len(fr_list)
+                return f"{avg_fr:.4f}%"
+    except Exception as e:
+        return f"エラー:{str(e)[:5]}"
+    return "データなし"
 
 def main():
     if not SLACK_URL:
-        print("エラー: SLACK_WEBHOOK_URL が未設定です。")
         sys.exit(1)
 
-    # 監視対象（3月にアンロックがある主要銘柄）
+    # 監視銘柄
     tokens = [
-        {"symbol": "SUI", "date": "2026-03-15", "pct": 1.4},
-        {"symbol": "ARB", "date": "2026-03-16", "pct": 1.2},
-        {"symbol": "STRK", "date": "2026-03-15", "pct": 1.3},
-        {"symbol": "SOL", "date": "2026-03-01", "pct": 0.5}
+        {"symbol": "SUI", "date": "03/15"},
+        {"symbol": "ARB", "date": "03/16"},
+        {"symbol": "STRK", "date": "03/15"},
+        {"symbol": "SOL", "date": "03/01"}
     ]
 
     messages = []
     for t in tokens:
         fr = get_fr(t['symbol'])
-        # FRがプラスなら「ショート有利」、マイナスなら「ショート過多（注意）」
-        fr_icon = "🔵" if "取得失敗" not in fr and "-" not in fr else "⚠️"
-        
-        msg = (f"{fr_icon} *${t['symbol']}* (解放日: {t['date']})\n"
-               f" ・解放量: {t['pct']}% / 現在のFR: `{fr}`")
-        messages.append(msg)
+        # 判定アイコン
+        icon = "🔵" if "0." in fr and "-" not in fr else "⚠️"
+        messages.append(f"{icon} *${t['symbol']}* ({t['date']}) FR: `{fr}`")
 
-    if messages:
-        header = "🔔 *【30日前】アンロック銘柄 & 金利(FR)レポート*\n"
-        footer = "\n> 🔵: FRプラス（ショート有利） / ⚠️: FRマイナス（コスト増）"
-        requests.post(SLACK_URL, json={"text": header + "\n".join(messages) + footer})
-        print("FR付きレポートを送信しました。")
+    payload = {"text": "🔔 *最新FRレポート*\n" + "\n".join(messages)}
+    requests.post(SLACK_URL, json=payload)
 
 if __name__ == "__main__":
     main()
