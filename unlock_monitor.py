@@ -1,13 +1,12 @@
 import requests
 import os
 import sys
+from datetime import datetime
 
 SLACK_URL = os.getenv('SLACK_WEBHOOK_URL')
 
+
 def check_indicators(symbol):
-    """
-    HyperliquidからFRと取引高(Volume)を取得
-    """
     url = "https://api.hyperliquid.xyz/info"
     try:
         response = requests.post(url, json={"type": "metaAndAssetCtxs"}, timeout=10)
@@ -17,8 +16,8 @@ def check_indicators(symbol):
         for i, asset in enumerate(universe):
             if asset['name'] == symbol:
                 fr_val = float(asset_ctxs[i]['funding']) * 8 * 100
-                day_volume = float(asset_ctxs[i]['dayNtlVlm'])
-                return fr_val, day_volume
+                vol = float(asset_ctxs[i]['dayNtlVlm'])
+                return fr_val, vol
     except requests.RequestException as e:
         print(f"APIリクエストエラー ({symbol}): {e}")
         return None, None
@@ -26,6 +25,15 @@ def check_indicators(symbol):
         print(f"データ解析エラー ({symbol}): {e}")
         return None, None
     return None, None
+
+
+def send_slack(message: str) -> None:
+    try:
+        res = requests.post(SLACK_URL, json={"text": message}, timeout=10)
+        res.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Slack通知エラー: {e}")
+        sys.exit(1)
 
 
 def main():
@@ -42,32 +50,36 @@ def main():
         {"symbol": "OP",   "date": "03/29"}
     ]
 
+    # UTC 0時 = 日本時間 9時（GitHub ActionsのUTC基準）
+    now_hour = datetime.utcnow().hour
+
     alert_messages = []
+    status_messages = []
 
     for item in targets:
-        symbol = item['symbol']
-        fr, vol = check_indicators(symbol)
+        fr, vol = check_indicators(item['symbol'])
         if fr is None:
             continue
 
         if fr < -0.01:
-            msg = (f"🚨 *【緊急予兆検知：強い売り圧力】*\n"
-                   f"🚩 *${symbol}* (アンロック予定: {item['date']})\n"
-                   f" ・FRがマイナス転落: `{fr:.4f}%` (ショート過多)\n"
-                   f" ・24h Volume: `${vol:,.0f}`\n"
-                   f" ⚠️ DEXでの売りヘッジが急増中。取引所へのインフローが行われた可能性があります。")
-            alert_messages.append(msg)
+            alert_messages.append(
+                f"🚨 *【緊急予兆】${item['symbol']}*\n"
+                f" ・FR: `{fr:.4f}%` / Vol: `${vol:,.0f}`\n"
+                f" ⚠️ 売りヘッジ急増。インフローの可能性大。"
+            )
 
+        status_icon = "⚪" if fr >= 0 else "🔴"
+        status_messages.append(
+            f"{status_icon} *${item['symbol']}* ({item['date']}) FR: `{fr:.4f}%`"
+        )
+
+    # A: 異常がある場合は即時通知
     if alert_messages:
-        full_msg = "📢 *【重要】アンロック直前のオンチェーン/市場異常検知*\n\n" + "\n\n".join(alert_messages)
-        try:
-            res = requests.post(SLACK_URL, json={"text": full_msg}, timeout=10)
-            res.raise_for_status()
-        except requests.RequestException as e:
-            print(f"Slack通知エラー: {e}")
-            sys.exit(1)
-    else:
-        print("現在、対象銘柄に特筆すべき異常値は検知されていません。")
+        send_slack("📢 *【異常検知アラート】*\n\n" + "\n\n".join(alert_messages))
+
+    # B: UTC 0時（日本時間 9時）のみ定時レポートを送信
+    if now_hour == 0:
+        send_slack("📅 *【定時】アンロック銘柄モニタリング*\n\n" + "\n".join(status_messages))
 
 
 if __name__ == "__main__":
